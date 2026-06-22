@@ -3,6 +3,7 @@ import Carbon
 
 /// Carbon hot keys work while PloegShot is in the background and do not require
 /// Accessibility permission. Screen capture permission is requested separately.
+@MainActor
 final class HotKeyCenter {
     static let shared = HotKeyCenter()
 
@@ -13,6 +14,7 @@ final class HotKeyCenter {
     private init() {}
 
     func registerCaptureShortcuts(
+        settings: HotKeySettings,
         area: @escaping () -> Void,
         repeatArea: @escaping () -> Void,
         screen: @escaping () -> Void
@@ -39,15 +41,15 @@ final class HotKeyCenter {
             return noErr
         }, 1, &eventType, nil, &eventHandler)
 
-        register(id: 1, keyCode: UInt32(kVK_ANSI_2))
-        register(id: 2, keyCode: UInt32(kVK_ANSI_R))
-        register(id: 3, keyCode: UInt32(kVK_ANSI_F))
+        register(id: 1, hotKey: settings.area)
+        register(id: 2, hotKey: settings.repeatArea)
+        register(id: 3, hotKey: settings.screen)
     }
 
-    private func register(id: UInt32, keyCode: UInt32) {
+    private func register(id: UInt32, hotKey: CaptureHotKey) {
         var reference: EventHotKeyRef?
         let identifier = EventHotKeyID(signature: Self.signature, id: id)
-        RegisterEventHotKey(keyCode, UInt32(cmdKey | shiftKey), identifier, GetApplicationEventTarget(), 0, &reference)
+        RegisterEventHotKey(hotKey.keyCode, hotKey.carbonModifiers, identifier, GetApplicationEventTarget(), 0, &reference)
         if let reference { hotKeys.append(reference) }
     }
 

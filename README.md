@@ -4,7 +4,7 @@ PloegShot is a native macOS screenshot utility built with SwiftUI and AppKit.
 
 ## MVP features
 
-- Area (**⌘⇧2**), reusable previous area (**⌘⇧R**), and full-display (**⌘⇧F**) capture
+- Configurable global shortcuts for area, reusable previous-area, and full-display capture
 - Multi-display selection overlays and Retina-resolution capture
 - Floating bottom-left preview with Copy, Save, and Edit actions
 - Non-destructive arrows, lines, text, shapes, freehand drawing, and highlights
