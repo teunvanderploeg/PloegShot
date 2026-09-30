@@ -48,11 +48,13 @@ enum AnnotationRenderer {
             path.stroke()
 
         case let .redact(rect):
-            let rect = mapped(rect, transform)
-            NSColor.black.setFill()
-            NSBezierPath(roundedRect: rect, xRadius: 3 * scale, yRadius: 3 * scale).fill()
+            // Cover boundary pixels completely, including fractional selections.
+            let rect = mapped(rect, transform).integral
             NSGraphicsContext.current?.saveGraphicsState()
-            NSBezierPath(roundedRect: rect, xRadius: 3 * scale, yRadius: 3 * scale).addClip()
+            NSGraphicsContext.current?.shouldAntialias = false
+            NSColor.black.setFill()
+            NSBezierPath(rect: rect).fill()
+            NSBezierPath(rect: rect).addClip()
             NSColor.white.withAlphaComponent(0.14).setStroke()
             let hatch = NSBezierPath()
             var x = rect.minX - rect.height

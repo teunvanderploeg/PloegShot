@@ -3,15 +3,106 @@ import SwiftUI
 
 struct AnnotationCanvas: NSViewRepresentable {
     @ObservedObject var document: EditorDocument
+    @Binding var zoomScale: CGFloat?
+    @Binding var actualZoom: CGFloat
 
-    func makeNSView(context: Context) -> AnnotationCanvasView {
-        AnnotationCanvasView(document: document)
+    func makeNSView(context: Context) -> AnnotationViewportView {
+        AnnotationViewportView(document: document)
     }
 
-    func updateNSView(_ view: AnnotationCanvasView, context: Context) {
-        view.document = document
-        view.needsDisplay = true
-        view.window?.invalidateCursorRects(for: view)
+    func updateNSView(_ view: AnnotationViewportView, context: Context) {
+        view.canvas.document = document
+        view.onActualZoom = { scale in
+            DispatchQueue.main.async {
+                if abs(actualZoom - scale) > 0.0001 { actualZoom = scale }
+            }
+        }
+        view.onPinchZoom = { scale in zoomScale = scale }
+        view.setZoom(zoomScale)
+        view.canvas.needsDisplay = true
+        view.window?.invalidateCursorRects(for: view.canvas)
+    }
+}
+
+final class AnnotationViewportView: NSView {
+    let canvas: AnnotationCanvasView
+    private let scrollView = CanvasScrollView()
+    private var requestedZoom: CGFloat?
+    var onActualZoom: ((CGFloat) -> Void)?
+    var onPinchZoom: ((CGFloat) -> Void)?
+
+    init(document: EditorDocument) {
+        canvas = AnnotationCanvasView(document: document)
+        super.init(frame: .zero)
+        scrollView.contentView = CenteredClipView()
+        scrollView.drawsBackground = false
+        scrollView.contentView.drawsBackground = false
+        scrollView.hasHorizontalScroller = true
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
+        scrollView.allowsMagnification = true
+        scrollView.minMagnification = 0.01
+        scrollView.maxMagnification = 8
+        canvas.frame = CGRect(origin: .zero, size: CGSize(width: document.image.size.width + 36, height: document.image.size.height + 36))
+        scrollView.documentView = canvas
+        scrollView.onMagnify = { [weak self] scale in
+            guard let self else { return }
+            self.requestedZoom = scale
+            self.canvas.viewportScale = scale
+            self.onActualZoom?(scale)
+            self.onPinchZoom?(scale)
+            self.canvas.needsDisplay = true
+        }
+        addSubview(scrollView)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func layout() {
+        super.layout()
+        scrollView.frame = bounds
+        applyZoom()
+    }
+
+    func setZoom(_ scale: CGFloat?) {
+        requestedZoom = scale
+        applyZoom()
+    }
+
+    private func applyZoom() {
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        let fit = min(scrollView.contentSize.width / canvas.frame.width, scrollView.contentSize.height / canvas.frame.height)
+        let scale = min(8, max(0.01, requestedZoom ?? fit))
+        if abs(scrollView.magnification - scale) > 0.0001 {
+            let center = requestedZoom == nil
+                ? CGPoint(x: canvas.bounds.midX, y: canvas.bounds.midY)
+                : CGPoint(x: scrollView.contentView.bounds.midX, y: scrollView.contentView.bounds.midY)
+            scrollView.setMagnification(scale, centeredAt: center)
+        }
+        canvas.viewportScale = scale
+        onActualZoom?(scale)
+        canvas.needsDisplay = true
+    }
+}
+
+private final class CanvasScrollView: NSScrollView {
+    var onMagnify: ((CGFloat) -> Void)?
+
+    override func magnify(with event: NSEvent) {
+        super.magnify(with: event)
+        onMagnify?(magnification)
+    }
+}
+
+private final class CenteredClipView: NSClipView {
+    override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
+        var rect = super.constrainBoundsRect(proposedBounds)
+        if let document = documentView {
+            if document.frame.width < rect.width { rect.origin.x = (document.frame.width - rect.width) / 2 }
+            if document.frame.height < rect.height { rect.origin.y = (document.frame.height - rect.height) / 2 }
+        }
+        return rect
     }
 }
 
@@ -21,6 +112,9 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
     }
 
     var document: EditorDocument
+    var viewportScale: CGFloat = 1
+    private var interactionScale: CGFloat { max(0.01, viewportScale * imageRect.width / document.image.size.width) }
+    private var interactionTrackingArea: NSTrackingArea?
     private var dragStart: CGPoint?
     private var dragEnd: CGPoint?
     private var dragPoints: [CGPoint] = []
@@ -52,6 +146,14 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
     override func layout() {
         super.layout()
         positionInlineTextField()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let interactionTrackingArea { removeTrackingArea(interactionTrackingArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .cursorUpdate, .activeInKeyWindow, .inVisibleRect], owner: self)
+        addTrackingArea(area)
+        interactionTrackingArea = area
     }
 
     override func resetCursorRects() {
@@ -110,7 +212,7 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
                 return
             }
 
-            let tolerance = 8 / max(imageRect.width / document.image.size.width, 0.01)
+            let tolerance = 8 / interactionScale
             let index = document.annotationIndex(at: point, tolerance: tolerance)
             document.selectAnnotation(at: index)
 
@@ -157,7 +259,7 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
            let handle = resizeHandle,
            let original = movingAnnotation,
            let index = document.selectedAnnotationIndex {
-            let minimumSize = 12 / max(imageRect.width / document.image.size.width, 0.01)
+            let minimumSize = 12 / interactionScale
             let bounds = resizedBounds(from: original.bounds, handle: handle, to: point, minimumSize: minimumSize)
             document.updateAnnotationTransiently(at: index, to: original.resized(to: bounds))
             didMoveAnnotation = true
@@ -234,9 +336,9 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
     private var imageRect: CGRect {
         let imageSize = document.image.size
         guard imageSize.width > 0, imageSize.height > 0, bounds.width > 0, bounds.height > 0 else { return .zero }
-        let scale = min(bounds.width / imageSize.width, bounds.height / imageSize.height)
-        let size = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
-        return CGRect(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2, width: size.width, height: size.height)
+        // The scroll view owns magnification. Keep the document in image
+        // coordinates, with an 18-point margin, so 100% really is 1:1.
+        return CGRect(origin: CGPoint(x: 18, y: 18), size: imageSize)
     }
 
     private func imagePoint(_ point: CGPoint, clamped: Bool = false) -> CGPoint {
@@ -417,25 +519,27 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
         let a = viewPoint(bounds.origin)
         let b = viewPoint(CGPoint(x: bounds.maxX, y: bounds.maxY))
         let rect = CGRect(
-            x: min(a.x, b.x) - 4,
-            y: min(a.y, b.y) - 4,
-            width: abs(b.x - a.x) + 8,
-            height: abs(b.y - a.y) + 8
+            x: min(a.x, b.x) - 4 / viewportScale,
+            y: min(a.y, b.y) - 4 / viewportScale,
+            width: abs(b.x - a.x) + 8 / viewportScale,
+            height: abs(b.y - a.y) + 8 / viewportScale
         )
         let path = NSBezierPath(rect: rect)
-        path.setLineDash([4, 3], count: 2, phase: 0)
-        path.lineWidth = 1
+        path.setLineDash([4 / viewportScale, 3 / viewportScale], count: 2, phase: 0)
+        path.lineWidth = 1 / viewportScale
         NSColor.controlAccentColor.setStroke()
         path.stroke()
 
         for (handle, point) in handlePoints(for: rect) {
             let isActive = handle == hoveredResizeHandle || handle == resizeHandle
-            let size: CGFloat = isActive ? 9 : 7
+            let size: CGFloat = (isActive ? 9 : 7) / viewportScale
             let handleRect = CGRect(x: point.x - size / 2, y: point.y - size / 2, width: size, height: size)
             (isActive ? NSColor.controlAccentColor : NSColor.white).setFill()
             handleRect.fill()
             NSColor.controlAccentColor.setStroke()
-            NSBezierPath(rect: handleRect).stroke()
+            let border = NSBezierPath(rect: handleRect)
+            border.lineWidth = 1 / viewportScale
+            border.stroke()
         }
     }
 
@@ -446,10 +550,10 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
         let a = viewPoint(bounds.origin)
         let b = viewPoint(CGPoint(x: bounds.maxX, y: bounds.maxY))
         return CGRect(
-            x: min(a.x, b.x) - 4,
-            y: min(a.y, b.y) - 4,
-            width: abs(b.x - a.x) + 8,
-            height: abs(b.y - a.y) + 8
+            x: min(a.x, b.x) - 4 / viewportScale,
+            y: min(a.y, b.y) - 4 / viewportScale,
+            width: abs(b.x - a.x) + 8 / viewportScale,
+            height: abs(b.y - a.y) + 8 / viewportScale
         )
     }
 
@@ -469,7 +573,7 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
     private func resizeHandle(at viewPoint: CGPoint) -> ResizeHandle? {
         guard let rect = selectedAnnotationRect() else { return nil }
         return handlePoints(for: rect).first { _, point in
-            CGRect(x: point.x - 7, y: point.y - 7, width: 14, height: 14).contains(viewPoint)
+            CGRect(x: point.x - 7 / viewportScale, y: point.y - 7 / viewportScale, width: 14 / viewportScale, height: 14 / viewportScale).contains(viewPoint)
         }?.key
     }
 
@@ -522,7 +626,7 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
         }
 
         let point = imagePoint(location)
-        let tolerance = 8 / max(imageRect.width / document.image.size.width, 0.01)
+        let tolerance = 8 / interactionScale
         if document.annotationIndex(at: point, tolerance: tolerance) != nil {
             NSCursor.openHand.set()
         } else {

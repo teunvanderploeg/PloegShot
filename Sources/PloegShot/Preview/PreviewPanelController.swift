@@ -1,22 +1,49 @@
 import AppKit
 import SwiftUI
 
+/// A page is sized to the display so every retained preview remains reachable.
+struct PreviewStackPage {
+    let capacity: Int
+    let range: Range<Int>
+    let total: Int
+
+    init(total: Int, offset: Int, visibleHeight: CGFloat) {
+        self.total = max(0, total)
+        capacity = max(1, Int((max(0, visibleHeight - 36) + PreviewPanelController.stackSpacing)
+            / (PreviewPanelController.panelSize.height + PreviewPanelController.stackSpacing)))
+        let lastPage = self.total == 0 ? 0 : ((self.total - 1) / capacity) * capacity
+        let start = min(max(0, offset / capacity * capacity), lastPage)
+        range = start..<min(start + capacity, self.total)
+    }
+
+    var hasNewer: Bool { range.lowerBound > 0 }
+    var hasOlder: Bool { range.upperBound < total }
+    var label: String { "\(range.lowerBound + 1)–\(range.upperBound) of \(total)" }
+}
+
+private final class PreviewState: ObservableObject {
+    weak var controller: PreviewPanelController?
+    @Published var page = PreviewStackPage(total: 1, offset: 0, visibleHeight: 200)
+    @Published var showsNavigation = false
+}
+
 final class PreviewPanelController: NSWindowController, NSWindowDelegate {
     static let panelSize = CGSize(width: 320, height: 200)
     static let stackSpacing: CGFloat = 12
 
-    private let targetScreen: NSScreen
     private let onClose: (PreviewPanelController) -> Void
+    private let state = PreviewState()
 
     init(
         image: NSImage,
         screen: NSScreen,
-        onCopy: @escaping () -> Void,
-        onSave: @escaping () -> Void,
+        onCopy: @escaping () -> Bool,
+        onSave: @escaping () -> Bool,
         onEdit: @escaping () -> Void,
+        onNewer: @escaping (PreviewPanelController) -> Void,
+        onOlder: @escaping (PreviewPanelController) -> Void,
         onClose: @escaping (PreviewPanelController) -> Void
     ) {
-        self.targetScreen = screen
         self.onClose = onClose
         let visible = screen.visibleFrame
         let panelFrame = CGRect(
@@ -25,7 +52,7 @@ final class PreviewPanelController: NSWindowController, NSWindowDelegate {
             width: Self.panelSize.width,
             height: Self.panelSize.height
         )
-        let panel = UnconstrainedPreviewPanel(
+        let panel = NSPanel(
             contentRect: panelFrame,
             styleMask: [.nonactivatingPanel, .fullSizeContentView],
             backing: .buffered,
@@ -44,15 +71,23 @@ final class PreviewPanelController: NSWindowController, NSWindowDelegate {
         panel.contentMinSize = Self.panelSize
         panel.contentMaxSize = Self.panelSize
 
+        let previewState = state
         let root = PreviewView(
             image: image,
+            state: state,
             onCopy: onCopy,
             onSave: onSave,
             onEdit: { [weak panel] in
                 panel?.close()
                 onEdit()
             },
-            onClose: { [weak panel] in panel?.close() }
+            onClose: { [weak panel] in panel?.close() },
+            onNewer: { [weak previewState] in
+                if let controller = previewState?.controller { onNewer(controller) }
+            },
+            onOlder: { [weak previewState] in
+                if let controller = previewState?.controller { onOlder(controller) }
+            }
         )
         .frame(width: Self.panelSize.width, height: Self.panelSize.height)
         let hostingController = NSHostingController(rootView: root)
@@ -62,6 +97,7 @@ final class PreviewPanelController: NSWindowController, NSWindowDelegate {
         // intrinsic size from moving the panel back onto the primary display.
         panel.setFrame(panelFrame, display: false)
         super.init(window: panel)
+        state.controller = self
         panel.delegate = self
     }
 
@@ -70,10 +106,10 @@ final class PreviewPanelController: NSWindowController, NSWindowDelegate {
     func show() { window?.orderFrontRegardless() }
     func windowWillClose(_ notification: Notification) { onClose(self) }
 
-    /// New captures use index zero at the bottom. Older captures move upward,
-    /// so every additional screenshot appears below the previous one.
-    func setStackIndex(_ index: Int) {
-        let visible = targetScreen.visibleFrame
+    func setStackIndex(_ index: Int, page: PreviewStackPage, on screen: NSScreen) {
+        state.page = page
+        state.showsNavigation = index == 0 && page.total > page.capacity
+        let visible = screen.visibleFrame
         let origin = CGPoint(
             x: visible.minX + 18,
             y: visible.minY + 18 + CGFloat(index) * (Self.panelSize.height + Self.stackSpacing)
@@ -82,21 +118,16 @@ final class PreviewPanelController: NSWindowController, NSWindowDelegate {
     }
 }
 
-/// AppKit normally keeps windows inside the visible screen, which causes every
-/// item past the top edge to collapse onto the same position. Preview stacks are
-/// intentionally allowed to continue off-screen and return as lower cards close.
-private final class UnconstrainedPreviewPanel: NSPanel {
-    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
-        frameRect
-    }
-}
-
 private struct PreviewView: View {
     let image: NSImage
-    let onCopy: () -> Void
-    let onSave: () -> Void
+    @ObservedObject var state: PreviewState
+    let onCopy: () -> Bool
+    let onSave: () -> Bool
     let onEdit: () -> Void
     let onClose: () -> Void
+    let onNewer: () -> Void
+    let onOlder: () -> Void
+    @State private var feedback: String?
 
     var body: some View {
         GeometryReader { geometry in
@@ -107,14 +138,36 @@ private struct PreviewView: View {
                     .resizable()
                     .scaledToFit()
                     .frame(width: geometry.size.width, height: geometry.size.height)
+                    .contentShape(Rectangle())
+                    .help("Drag this screenshot into another app")
+                    .accessibilityLabel("Screenshot. Drag to copy into another app.")
+                    .onDrag {
+                        do {
+                            return try ImageExporter.dragItemProvider(for: image)
+                        } catch {
+                            feedback = "Could not prepare PNG file"
+                            return NSItemProvider(object: image)
+                        }
+                    } preview: {
+                        Image(nsImage: image).resizable().scaledToFit().frame(width: 240, height: 150)
+                    }
 
                 VStack {
                     HStack {
+                        if state.showsNavigation { stackNavigation }
                         Spacer()
                         closeButton
                     }
                     Spacer()
                     HStack {
+                        if let feedback {
+                            Text(feedback)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.white)
+                                .padding(6)
+                                .background(.black.opacity(0.8), in: RoundedRectangle(cornerRadius: 4))
+                                .accessibilityLabel(feedback)
+                        }
                         Spacer()
                         actionToolbar
                     }
@@ -125,15 +178,29 @@ private struct PreviewView: View {
             .frame(width: geometry.size.width, height: geometry.size.height)
             .clipped()
         }
+        .task(id: feedback) {
+            guard feedback != nil else { return }
+            do { try await Task.sleep(nanoseconds: 2_000_000_000) } catch { return }
+            feedback = nil
+        }
+    }
+
+    private var stackNavigation: some View {
+        HStack(spacing: 5) {
+            toolbarButton("chevron.left", "Newer screenshots", onNewer).disabled(!state.page.hasNewer)
+            Text(state.page.label).font(.caption.monospacedDigit()).foregroundStyle(.white)
+            toolbarButton("chevron.right", "Older screenshots", onOlder).disabled(!state.page.hasOlder)
+        }
+        .background(.black.opacity(0.8), in: RoundedRectangle(cornerRadius: 4))
     }
 
     private var actionToolbar: some View {
         HStack(spacing: 0) {
             toolbarButton("pencil.tip", "Edit", onEdit)
             separator
-            toolbarButton("doc.on.doc", "Copy", onCopy)
+            toolbarButton("doc.on.doc", "Copy") { feedback = onCopy() ? "Copied" : "Copy failed" }
             separator
-            toolbarButton("square.and.arrow.down", "Save", onSave)
+            toolbarButton("square.and.arrow.down", "Save") { if onSave() { feedback = "Saved" } }
         }
         .padding(.horizontal, 3)
         .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 4))
@@ -186,6 +253,7 @@ private struct HoverIconButton: View {
         }
         .buttonStyle(.plain)
         .help(label)
+        .accessibilityLabel(label)
         .onHover { hovering in
             isHovered = hovering
             (hovering ? NSCursor.pointingHand : NSCursor.arrow).set()

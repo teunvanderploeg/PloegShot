@@ -206,13 +206,27 @@ final class EditorDocument: ObservableObject {
     }
 
     /// Produces a flattened image at the original capture resolution.
-    func renderedImage() -> NSImage {
+    func renderedImage() throws -> NSImage {
+        // An explicit bitmap avoids lockFocus choosing the current screen's
+        // backing scale and changing the exported screenshot's pixel dimensions.
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(image.size.width), pixelsHigh: Int(image.size.height),
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ), let context = NSGraphicsContext(bitmapImageRep: bitmap) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        bitmap.size = image.size
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        defer { NSGraphicsContext.restoreGraphicsState() }
         let output = NSImage(size: image.size)
-        output.lockFocus()
-        NSGraphicsContext.current?.imageInterpolation = .high
+        context.imageInterpolation = .high
         image.draw(in: CGRect(origin: .zero, size: image.size))
         AnnotationRenderer.draw(annotations, transform: { $0 }, scale: 1)
-        output.unlockFocus()
+        context.flushGraphics()
+        output.addRepresentation(bitmap)
         return output
     }
 }

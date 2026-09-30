@@ -25,6 +25,9 @@ final class EditorWindowController: NSWindowController {
 
 private struct EditorView: View {
     @ObservedObject var document: EditorDocument
+    @State private var zoomScale: CGFloat?
+    @State private var actualZoom: CGFloat = 1
+    @State private var feedback: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -39,6 +42,11 @@ private struct EditorView: View {
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .task(id: feedback) {
+            guard feedback != nil else { return }
+            do { try await Task.sleep(nanoseconds: 2_000_000_000) } catch { return }
+            feedback = nil
+        }
     }
 
     private var topBar: some View {
@@ -49,6 +57,10 @@ private struct EditorView: View {
                 .foregroundStyle(.secondary)
 
             Spacer()
+
+            if let feedback {
+                Text(feedback).font(.caption).foregroundStyle(.secondary)
+            }
 
             HStack(spacing: 2) {
                 iconButton("arrow.uturn.backward", "Undo") { document.undo() }
@@ -64,14 +76,14 @@ private struct EditorView: View {
             Divider().frame(height: 20).padding(.horizontal, 2)
 
             Button {
-                ImageExporter.copyToClipboard(document.renderedImage())
+                exportImage(save: false)
             } label: {
                 Label("Copy", systemImage: "doc.on.doc")
             }
             .keyboardShortcut("c", modifiers: [.command, .shift])
 
             Button {
-                ImageExporter.save(document.renderedImage())
+                exportImage(save: true)
             } label: {
                 Label("Save", systemImage: "square.and.arrow.down")
             }
@@ -123,8 +135,7 @@ private struct EditorView: View {
     }
 
     private var canvas: some View {
-        AnnotationCanvas(document: document)
-            .padding(18)
+        AnnotationCanvas(document: document, zoomScale: $zoomScale, actualZoom: $actualZoom)
             .background(Color(nsColor: NSColor(calibratedWhite: 0.105, alpha: 1)))
             .overlay(alignment: .bottomLeading) {
                 Label(instruction, systemImage: document.selectedTool.systemImage)
@@ -163,7 +174,7 @@ private struct EditorView: View {
                     .keyboardShortcut(.delete, modifiers: [])
                 }
             } else if document.selectedTool == .redact {
-                Label("Draw over sensitive content to permanently hide it.", systemImage: "lock.fill")
+                Label("Cover sensitive content. Redaction is permanent in copied and saved images; it stays editable here.", systemImage: "lock.fill")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -222,6 +233,34 @@ private struct EditorView: View {
                 shortcut("⇧ ⌘ C", "Copy")
             }
 
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Zoom").font(.caption.weight(.medium))
+                    Spacer()
+                    Text("\(Int((actualZoom * 100).rounded()))%")
+                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                }
+                HStack(spacing: 4) {
+                    iconButton("minus.magnifyingglass", "Zoom out") { zoomScale = max(0.01, actualZoom / 1.25) }
+                        .keyboardShortcut("-", modifiers: .command)
+                        .disabled(actualZoom <= 0.01)
+                    iconButton("plus.magnifyingglass", "Zoom in") { zoomScale = min(8, actualZoom * 1.25) }
+                        .keyboardShortcut("=", modifiers: .command)
+                        .disabled(actualZoom >= 8)
+                    Button("Fit") { zoomScale = nil }
+                        .keyboardShortcut("0", modifiers: .command)
+                        .fixedSize()
+                    Button("100%") { zoomScale = 1 }
+                        .help("One image pixel per canvas point")
+                        .fixedSize()
+                }
+                .controlSize(.small)
+                Text("Scroll to pan. Pinch to zoom.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Spacer()
         }
         .padding(12)
@@ -245,6 +284,20 @@ private struct EditorView: View {
         }
         .buttonStyle(.plain)
         .help(help)
+        .accessibilityLabel(help)
+    }
+
+    private func exportImage(save: Bool) {
+        do {
+            let image = try document.renderedImage()
+            if save {
+                if ImageExporter.save(image) { feedback = "Saved" }
+            } else {
+                feedback = ImageExporter.copyToClipboard(image) ? "Copied" : "Copy failed"
+            }
+        } catch {
+            NSAlert(error: error).runModal()
+        }
     }
 
     private func shortcut(_ keys: String, _ label: String) -> some View {
