@@ -1,5 +1,11 @@
 # PloegShot
 
+[**Download PloegShot for Mac**](https://github.com/teunvanderploeg/PloegShot/releases/latest/download/PloegShot-macOS-AppleSilicon.dmg)
+
+Apple silicon. macOS 13.0 or later.
+Open the disk image and drag PloegShot to Applications.
+[ZIP download and checksums](https://github.com/teunvanderploeg/PloegShot/releases/latest).
+
 PloegShot is a native macOS screenshot utility built with SwiftUI and AppKit.
 
 The redesigned PloegShot interface is in beta. More updates will follow.
