@@ -21,6 +21,7 @@
 		B0000000000000000000000D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000010 /* Assets.xcassets */; };
 		B0000000000000000000000E /* Logo.png in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000011 /* Logo.png */; };
 		B0000000000000000000000F /* HotKeySettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000012 /* HotKeySettings.swift */; };
+		B00000000000000000000010 /* PloegKit in Frameworks */ = {isa = PBXBuildFile; productRef = E10000000000000000000002 /* PloegKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -45,7 +46,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		D00000000000000000000002 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		D00000000000000000000002 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (B00000000000000000000010 /* PloegKit in Frameworks */,); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -81,6 +82,7 @@
 			buildRules = ();
 			dependencies = ();
 			name = PloegShot;
+			packageProductDependencies = (E10000000000000000000002 /* PloegKit */,);
 			productName = PloegShot;
 			productReference = A0000000000000000000000E /* PloegShot.app */;
 			productType = "com.apple.product-type.application";
@@ -98,6 +100,7 @@
 			knownRegions = (en, Base,);
 			mainGroup = C00000000000000000000001;
 			productRefGroup = C00000000000000000000002 /* Products */;
+			packageReferences = (E10000000000000000000001 /* XCLocalSwiftPackageReference "../PloegKit" */,);
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (E00000000000000000000001 /* PloegShot */,);
@@ -149,6 +152,21 @@
 			SWIFT_EMIT_LOC_STRINGS = YES;
 		}; name = Release; };
 /* End XCBuildConfiguration section */
+
+/* Begin XCLocalSwiftPackageReference section */
+        E10000000000000000000001 /* XCLocalSwiftPackageReference "../PloegKit" */ = {
+            isa = XCLocalSwiftPackageReference;
+            relativePath = ../PloegKit;
+        };
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+        E10000000000000000000002 /* PloegKit */ = {
+            isa = XCSwiftPackageProductDependency;
+            package = E10000000000000000000001 /* XCLocalSwiftPackageReference "../PloegKit" */;
+            productName = PloegKit;
+        };
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCConfigurationList section */
 		F00000000000000000000001 = {isa = XCConfigurationList; buildConfigurations = (F10000000000000000000001, F10000000000000000000002,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };

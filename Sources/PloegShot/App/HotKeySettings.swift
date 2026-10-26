@@ -1,6 +1,7 @@
 import AppKit
 import Carbon
 import SwiftUI
+import PloegKit
 
 struct CaptureHotKey: Codable, Equatable {
     let keyCode: UInt32
@@ -195,7 +196,7 @@ struct HotKeyRecorder: NSViewRepresentable {
         private var isRecording = false
 
         override var acceptsFirstResponder: Bool { true }
-        override var intrinsicContentSize: NSSize { NSSize(width: 130, height: 28) }
+        override var intrinsicContentSize: NSSize { NSSize(width: 136, height: 36) }
 
         override func mouseDown(with event: NSEvent) {
             window?.makeFirstResponder(self)
@@ -225,16 +226,16 @@ struct HotKeyRecorder: NSViewRepresentable {
         }
 
         override func draw(_ dirtyRect: NSRect) {
-            let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6)
-            (isRecording ? NSColor.controlAccentColor.withAlphaComponent(0.12) : NSColor.controlBackgroundColor).setFill()
+            let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 8, yRadius: 8)
+            (isRecording ? PloegTheme.accentSoftNS : PloegTheme.surfaceNS).setFill()
             path.fill()
-            (isRecording ? NSColor.controlAccentColor : NSColor.separatorColor).setStroke()
+            (isRecording ? PloegTheme.accentNS : PloegTheme.lineNS).setStroke()
             path.stroke()
 
             let text = isRecording ? "Type shortcut" : hotKey.displayName
             let attributes: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: 13, weight: .medium),
-                .foregroundColor: NSColor.labelColor
+                .foregroundColor: PloegTheme.inkNS
             ]
             let size = text.size(withAttributes: attributes)
             text.draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2), withAttributes: attributes)

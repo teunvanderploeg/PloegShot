@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import PloegKit
 
 /// A page is sized to the display so every retained preview remains reachable.
 struct PreviewStackPage {
@@ -130,54 +131,67 @@ private struct PreviewView: View {
     @State private var feedback: String?
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                Color(nsColor: NSColor(calibratedWhite: 0.08, alpha: 1))
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                PloegAppIcon(.shot, size: 20)
+                if state.showsNavigation {
+                    stackNavigation
+                } else {
+                    Text("Screenshot").font(.system(size: 12, weight: .semibold))
+                }
+                Spacer(minLength: 0)
+                HoverIconButton(icon: "xmark", label: "Close preview", action: onClose)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 34)
+            .background(PloegTheme.surface)
 
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: geometry.size.width, height: geometry.size.height)
-                    .contentShape(Rectangle())
-                    .help("Drag this screenshot into another app")
-                    .accessibilityLabel("Screenshot. Drag to copy into another app.")
-                    .onDrag {
-                        do {
-                            return try ImageExporter.dragItemProvider(for: image)
-                        } catch {
-                            feedback = "Could not prepare PNG file"
-                            return NSItemProvider(object: image)
-                        }
-                    } preview: {
-                        Image(nsImage: image).resizable().scaledToFit().frame(width: 240, height: 150)
+            Divider().overlay(PloegTheme.line)
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(PloegTheme.canvas)
+                .contentShape(Rectangle())
+                .help("Drag this screenshot into another app")
+                .accessibilityLabel("Screenshot. Drag to copy into another app.")
+                .onDrag {
+                    do {
+                        return try ImageExporter.dragItemProvider(for: image)
+                    } catch {
+                        feedback = "Could not prepare PNG file"
+                        return NSItemProvider(object: image)
                     }
-
-                VStack {
-                    HStack {
-                        if state.showsNavigation { stackNavigation }
-                        Spacer()
-                        closeButton
-                    }
-                    Spacer()
-                    HStack {
-                        if let feedback {
-                            Text(feedback)
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(.white)
-                                .padding(6)
-                                .background(.black.opacity(0.8), in: RoundedRectangle(cornerRadius: 4))
-                                .accessibilityLabel(feedback)
-                        }
-                        Spacer()
-                        actionToolbar
+                } preview: {
+                    Image(nsImage: image).resizable().scaledToFit().frame(width: 240, height: 150)
+                }
+                .overlay(alignment: .bottomLeading) {
+                    if let feedback {
+                        Text(feedback)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(PloegTheme.ink)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 5)
+                            .background(PloegTheme.surface, in: RoundedRectangle(cornerRadius: 6))
+                            .padding(7)
+                            .accessibilityLabel(feedback)
                     }
                 }
-                .padding(8)
-                .frame(width: geometry.size.width, height: geometry.size.height)
+            Divider().overlay(PloegTheme.line)
+            HStack(spacing: 6) {
+                actionButton("Edit", symbol: "pencil.tip", primary: true, action: onEdit)
+                actionButton("Copy", symbol: "doc.on.doc") { feedback = onCopy() ? "Copied" : "Copy failed" }
+                actionButton("Save", symbol: "square.and.arrow.down") { if onSave() { feedback = "Saved" } }
             }
-            .frame(width: geometry.size.width, height: geometry.size.height)
-            .clipped()
+            .padding(.horizontal, 8)
+            .frame(height: 48)
+            .background(PloegTheme.surface)
         }
+        .frame(width: PreviewPanelController.panelSize.width, height: PreviewPanelController.panelSize.height)
+        .foregroundStyle(PloegTheme.ink)
+        .tint(PloegTheme.accent)
+        .clipShape(RoundedRectangle(cornerRadius: PloegTheme.cardRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: PloegTheme.cardRadius).stroke(PloegTheme.line))
         .task(id: feedback) {
             guard feedback != nil else { return }
             do { try await Task.sleep(nanoseconds: 2_000_000_000) } catch { return }
@@ -186,69 +200,46 @@ private struct PreviewView: View {
     }
 
     private var stackNavigation: some View {
-        HStack(spacing: 5) {
-            toolbarButton("chevron.left", "Newer screenshots", onNewer).disabled(!state.page.hasNewer)
-            Text(state.page.label).font(.caption.monospacedDigit()).foregroundStyle(.white)
-            toolbarButton("chevron.right", "Older screenshots", onOlder).disabled(!state.page.hasOlder)
+        HStack(spacing: 4) {
+            HoverIconButton(icon: "chevron.left", label: "Newer screenshots", action: onNewer)
+                .disabled(!state.page.hasNewer)
+            Text(state.page.label)
+                .font(.system(size: 11).monospacedDigit())
+                .foregroundStyle(PloegTheme.muted)
+            HoverIconButton(icon: "chevron.right", label: "Older screenshots", action: onOlder)
+                .disabled(!state.page.hasOlder)
         }
-        .background(.black.opacity(0.8), in: RoundedRectangle(cornerRadius: 4))
     }
 
-    private var actionToolbar: some View {
-        HStack(spacing: 0) {
-            toolbarButton("pencil.tip", "Edit", onEdit)
-            separator
-            toolbarButton("doc.on.doc", "Copy") { feedback = onCopy() ? "Copied" : "Copy failed" }
-            separator
-            toolbarButton("square.and.arrow.down", "Save") { if onSave() { feedback = "Saved" } }
+    private func actionButton(_ title: String, symbol: String, primary: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: symbol)
+                .font(.system(size: 12, weight: .medium))
+                .frame(maxWidth: .infinity)
+                .frame(height: 32)
+                .foregroundStyle(primary ? PloegTheme.onAccent : PloegTheme.ink)
+                .background(primary ? PloegTheme.accent : PloegTheme.canvas, in: RoundedRectangle(cornerRadius: PloegTheme.controlRadius))
+                .overlay(RoundedRectangle(cornerRadius: PloegTheme.controlRadius).stroke(primary ? Color.clear : PloegTheme.line))
+                .contentShape(RoundedRectangle(cornerRadius: PloegTheme.controlRadius))
         }
-        .padding(.horizontal, 3)
-        .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 4))
-    }
-
-    private var closeButton: some View {
-        HoverIconButton(
-            icon: "xmark",
-            label: "Close",
-            size: CGSize(width: 25, height: 25),
-            hasPersistentBackground: true,
-            action: onClose
-        )
-    }
-
-    private var separator: some View {
-        Rectangle()
-            .fill(.white.opacity(0.18))
-            .frame(width: 1, height: 15)
-    }
-
-    private func toolbarButton(_ icon: String, _ label: String, _ action: @escaping () -> Void) -> some View {
-        HoverIconButton(
-            icon: icon,
-            label: label,
-            size: CGSize(width: 30, height: 27),
-            hasPersistentBackground: false,
-            action: action
-        )
+        .buttonStyle(.plain)
+        .help(title)
     }
 }
 
 private struct HoverIconButton: View {
     let icon: String
     let label: String
-    let size: CGSize
-    let hasPersistentBackground: Bool
     let action: () -> Void
-
     @State private var isHovered = false
 
     var body: some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.white.opacity(isHovered ? 1 : 0.82))
-                .frame(width: size.width, height: size.height)
-                .background(backgroundColor, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(PloegTheme.muted)
+                .frame(width: 24, height: 24)
+                .background(isHovered ? PloegTheme.canvas : Color.clear, in: RoundedRectangle(cornerRadius: 6))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -258,12 +249,5 @@ private struct HoverIconButton: View {
             isHovered = hovering
             (hovering ? NSCursor.pointingHand : NSCursor.arrow).set()
         }
-    }
-
-    private var backgroundColor: Color {
-        if hasPersistentBackground {
-            return isHovered ? .white.opacity(0.12) : .black.opacity(0.68)
-        }
-        return isHovered ? .white.opacity(0.09) : .clear
     }
 }
